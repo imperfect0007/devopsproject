@@ -15,8 +15,15 @@ spec:
       containers:
       - name: fastapi
         image: imperfect07/devops-project:latest
+        imagePullPolicy: Always
         ports:
         - containerPort: 5000
+        env:
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: fastapi-secrets
+              key: database-url
         resources:
           requests:
             cpu: "250m"
@@ -24,3 +31,19 @@ spec:
           limits:
             cpu: "500m"
             memory: "256Mi"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 5000
+          initialDelaySeconds: 15
+          periodSeconds: 20
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 5000
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 3

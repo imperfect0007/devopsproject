@@ -3,9 +3,10 @@ kind: Service
 metadata:
   name: fastapi-service
 spec:
+  type: ClusterIP
   selector:
     app: fastapi
   ports:
   - port: 5000
     targetPort: 5000
-
+    protocol: TCP

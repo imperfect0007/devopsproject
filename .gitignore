@@ -1,4 +1,32 @@
+# Terraform
 .terraform/
 *.tfstate
 *.tfstate.backup
+*.tfplan
+
+# Secrets
 *.pem
+.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+venv/
+.venv/
+*.egg-info/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Database
+*.db
