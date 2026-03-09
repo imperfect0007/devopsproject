@@ -1,0 +1,20 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: fastapi-app
+spec:
+  destination:
+    namespace: default
+    server: https://kubernetes.default.svc
+
+  source:
+    repoURL: https://github.com/imperfect0007/devopsproject
+    path: k8s
+    targetRevision: HEAD
+
+  project: default
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
