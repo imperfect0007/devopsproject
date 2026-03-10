@@ -6,13 +6,74 @@ A production-ready FastAPI application with full DevOps pipeline including Docke
 
 - **Application**: FastAPI (Python) with PostgreSQL
 - **Containerization**: Docker + Docker Compose
-- **Orchestration**: Kubernetes with Ingress
-- **CI/CD**: GitHub Actions (test → build → deploy)
-- **GitOps**: ArgoCD for K8s deployments
-- **IaC**: Terraform (AWS EC2 + security groups)
+- **Orchestration**: Kubernetes (EKS) with Ingress + HPA + PDB
+- **CI/CD**: GitHub Actions (test, build, GitOps deploy via ArgoCD)
+- **GitOps**: ArgoCD for automated K8s deployments
+- **IaC**: Terraform (AWS VPC, EKS, RDS, ALB, NAT Gateway)
 - **Monitoring**: Prometheus + Grafana + cAdvisor
 - **Logging**: Loki + Promtail (centralized, viewable in Grafana)
 - **Reverse Proxy**: Nginx
+- **Security**: NetworkPolicy, private subnets, Security Groups
+
+### Production Architecture Diagram
+
+```mermaid
+graph TB
+    subgraph internet [Internet]
+        User[Users]
+        GitHub[GitHub Repo]
+        DockerHub[Docker Hub]
+    end
+
+    subgraph aws [AWS Cloud - ap-south-1]
+        Route53[Route 53 DNS]
+        ALB["ALB (Load Balancer)"]
+
+        subgraph vpc [VPC 10.0.0.0/16]
+            subgraph publicSubnets [Public Subnets - 2 AZs]
+                NAT[NAT Gateway]
+                Bastion[Bastion Host]
+            end
+
+            subgraph privateSubnets [Private Subnets - 2 AZs]
+                subgraph eks [EKS Cluster]
+                    Ingress[Nginx Ingress]
+                    Pods["FastAPI (3-10 pods)"]
+                    Monitoring["Prometheus + Grafana + Loki"]
+                    ArgoCD[ArgoCD]
+                end
+                RDS["RDS PostgreSQL (Multi-AZ)"]
+            end
+        end
+    end
+
+    User --> Route53 --> ALB --> Ingress --> Pods --> RDS
+    ArgoCD --> GitHub
+    GitHub --> DockerHub
+```
+
+### CI/CD Flow
+
+```mermaid
+sequenceDiagram
+    participant Dev as Developer
+    participant GH as GitHub
+    participant GA as GitHub Actions
+    participant DH as Docker Hub
+    participant Argo as ArgoCD
+    participant EKS as EKS Cluster
+
+    Dev->>GH: Push to main
+    GH->>GA: Trigger pipeline
+    GA->>GA: Test + Lint
+    GA->>DH: Build and push image
+    GA->>GH: Update image tag in k8s/deployment.yml
+    GH-->>Argo: Detects change
+    Argo->>EKS: Sync deployment
+    EKS->>EKS: Rolling update
+```
+
+> Full architecture details: [docs/architecture.md](docs/architecture.md)
 
 ## Quick Start (Docker Compose)
 
@@ -250,25 +311,48 @@ docker compose logs -f
 
 ## Terraform (AWS Infrastructure)
 
-1. Initialize Terraform:
+Terraform provisions the full production AWS stack: VPC, EKS, RDS, ALB, NAT Gateway, and Bastion host.
+
+1. Copy the example variables file:
    ```bash
    cd terraform
-   terraform init
+   cp terraform.tfvars.example terraform.tfvars
    ```
 
-2. Plan and apply:
+2. Edit `terraform.tfvars` with your values (key pair, SSH CIDR, DB password).
+
+3. Initialize and apply:
    ```bash
-   terraform plan -var="key_name=your-key-pair"
-   terraform apply -var="key_name=your-key-pair"
+   terraform init
+   terraform plan
+   terraform apply
    ```
+
+4. Configure kubectl to use the new EKS cluster:
+   ```bash
+   aws eks update-kubeconfig --name devops-project --region ap-south-1
+   ```
+
+### Terraform Files
+
+| File | Resources |
+|------|-----------|
+| `main.tf` | Provider config, Bastion host |
+| `vpc.tf` | VPC, subnets (public + private), IGW, NAT Gateway, route tables |
+| `eks.tf` | EKS cluster, node group, IAM roles |
+| `rds.tf` | PostgreSQL RDS (Multi-AZ), DB subnet group, security group |
+| `alb.tf` | Application Load Balancer, target group, listener |
+| `backend.tf` | S3 remote state config (commented, enable after creating bucket) |
+| `variables.tf` | All input variables |
+| `outputs.tf` | Cluster endpoint, RDS endpoint, ALB DNS, kubectl command |
 
 ## CI/CD Pipeline
 
-The GitHub Actions pipeline runs on push to `main`:
+The GitHub Actions pipeline runs on push to `main` with three stages:
 
-1. **Test** - Linting and unit tests
-2. **Build & Push** - Docker image tagged with git SHA and pushed to Docker Hub
-3. **Deploy** - SSH deploy to EC2 (requires `production` environment approval)
+1. **Test** -- Lint (ruff) and unit tests (pytest)
+2. **Build & Push** -- Docker image tagged with git SHA, pushed to Docker Hub
+3. **Deploy** -- Updates image tag in `k8s/deployment.yml` and pushes to Git. ArgoCD detects the change and syncs to EKS automatically.
 
 ### Required GitHub Secrets
 
@@ -276,36 +360,45 @@ The GitHub Actions pipeline runs on push to `main`:
 |--------------------|----------------------------|
 | `DOCKERHUB_USERNAME` | Docker Hub username        |
 | `DOCKERHUB_PASSWORD` | Docker Hub password/token  |
-| `EC2_HOST`          | EC2 instance public IP     |
-| `EC2_USER`          | SSH username (e.g. ubuntu) |
-| `EC2_SSH_KEY`       | Private SSH key            |
-| `DATABASE_URL`      | Production database URL    |
 
 ## Project Structure
 
 ```
 .
-├── app/                    # FastAPI application
+├── app/                        # FastAPI application
 │   ├── main.py
 │   └── requirements.txt
-├── k8s/                    # Kubernetes manifests
+├── k8s/                        # Kubernetes manifests
+│   ├── namespace.yml
+│   ├── configmap.yml
 │   ├── deployment.yml
 │   ├── service.yml
-│   └── ingress.yaml
-├── terraform/              # AWS infrastructure
-│   ├── main.tf
-│   └── variables.tf
-├── monitoring/             # Monitoring & logging configs
+│   ├── ingress.yaml
+│   ├── hpa.yml                 # Horizontal Pod Autoscaler
+│   ├── pdb.yml                 # Pod Disruption Budget
+│   └── networkpolicy.yml       # Network segmentation
+├── terraform/                  # AWS infrastructure (IaC)
+│   ├── main.tf                 # Provider + Bastion
+│   ├── vpc.tf                  # VPC, subnets, NAT, IGW
+│   ├── eks.tf                  # EKS cluster + node group
+│   ├── rds.tf                  # PostgreSQL Multi-AZ
+│   ├── alb.tf                  # Application Load Balancer
+│   ├── backend.tf              # S3 remote state
+│   ├── variables.tf
+│   └── outputs.tf
+├── monitoring/                 # Monitoring & logging configs
 │   ├── prometheus.yml
 │   ├── promtail-config.yml
 │   ├── grafana-datasources.yml
 │   └── grafana-deployment.yml
-├── argocd/                 # GitOps
+├── argocd/                     # GitOps
 │   └── application.yml
-├── .github/workflows/      # CI/CD
+├── docs/                       # Documentation
+│   └── architecture.md         # Production HLD
+├── .github/workflows/          # CI/CD
 │   └── ci.yml
 ├── Dockerfile
 ├── docker-compose.yml
 ├── nginx.conf
-└── .env                    # Local secrets (not committed)
+└── .env                        # Local secrets (not committed)
 ```

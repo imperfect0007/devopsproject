@@ -1,0 +1,20 @@
+aws_region    = "ap-south-1"
+project_name  = "devops-project"
+environment   = "production"
+key_name      = "your-key-pair-name"
+allowed_ssh_cidr = "YOUR_IP/32"
+
+# Database (use strong passwords in production)
+db_username = "dbadmin"
+db_password = "change-me-to-a-strong-password"
+
+# EKS
+eks_version            = "1.29"
+eks_node_instance_type = "t3.medium"
+eks_node_desired       = 2
+eks_node_min           = 2
+eks_node_max           = 4
+
+# RDS
+db_instance_class = "db.t3.micro"
+db_name           = "tasks"

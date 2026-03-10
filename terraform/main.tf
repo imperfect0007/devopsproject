@@ -11,38 +11,33 @@ terraform {
 
 provider "aws" {
   region = var.aws_region
+
+  default_tags {
+    tags = {
+      Project     = var.project_name
+      Environment = var.environment
+      ManagedBy   = "terraform"
+    }
+  }
 }
 
-resource "aws_security_group" "devops_sg" {
-  name        = "devops-security-group"
-  description = "Security group for devops project server"
+# --- Bastion Host (for SSH access to private subnets) ---
+
+resource "aws_security_group" "bastion" {
+  name        = "${var.project_name}-bastion-sg"
+  description = "Allow SSH to bastion host"
+  vpc_id      = aws_vpc.main.id
 
   ingress {
-    description = "SSH access"
+    description = "SSH from admin"
     from_port   = 22
     to_port     = 22
     protocol    = "tcp"
     cidr_blocks = [var.allowed_ssh_cidr]
   }
 
-  ingress {
-    description = "App access"
-    from_port   = 5000
-    to_port     = 5000
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  ingress {
-    description = "HTTP access"
-    from_port   = 80
-    to_port     = 80
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
   egress {
-    description = "Allow all outbound traffic"
+    description = "Allow all outbound"
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
@@ -50,18 +45,18 @@ resource "aws_security_group" "devops_sg" {
   }
 
   tags = {
-    Name = "devops-security-group"
+    Name = "${var.project_name}-bastion-sg"
   }
 }
 
-resource "aws_instance" "devops_server" {
-  ami           = var.ami_id
-  instance_type = var.instance_type
-  key_name      = var.key_name
-
-  vpc_security_group_ids = [aws_security_group.devops_sg.id]
+resource "aws_instance" "bastion" {
+  ami                    = var.ami_id
+  instance_type          = "t2.micro"
+  key_name               = var.key_name
+  subnet_id              = aws_subnet.public[0].id
+  vpc_security_group_ids = [aws_security_group.bastion.id]
 
   tags = {
-    Name = "devops-project-server"
+    Name = "${var.project_name}-bastion"
   }
 }
